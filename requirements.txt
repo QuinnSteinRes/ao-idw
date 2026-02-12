@@ -1,0 +1,7 @@
+tensorflow>=2.16.0
+numpy<2.0
+scipy
+matplotlib
+pyDOE
+seaborn
+pyyaml

@@ -1,0 +1,51 @@
+# 2D Diffusion Inverse Problem Configuration
+# All hyperparameters from the legacy implementation
+
+# Physics parameters
+physics:
+  diff_coeff_true: 0.2    # True diffusion coefficient (for validation)
+  diff_coeff_init: 0.5    # Initial guess (deliberately far from true value)
+
+# IDW weighting parameters
+idw:
+  enabled: true          # Set to false for uniform weights
+  ema_beta: 0.9           # EMA smoothing for gradient energies
+  eps: 1.0e-12            # Small epsilon to avoid divide-by-zero
+  clamp_min: 1.0e-3       # Clamp raw weights minimum (stability)
+  clamp_max: 1.0e+3       # Clamp raw weights maximum (stability)
+  weight_sum_target: 3.0  # Three tasks (BC/IC, Data, PDE) -> normalize to sum = 3
+  freeze_before_lbfgs: true  # Freeze learned weights before L-BFGS
+
+# Training parameters
+training:
+  adam_lr: 1.0e-3         # Adam optimizer learning rate
+  adam_epochs: 10     # Number of Adam epochs 4000
+  print_every: 200        # Print/log frequency (in epochs)
+  
+  # L-BFGS parameters (scipy.optimize.minimize)
+  lbfgs_maxiter: 10     # Maximum L-BFGS iterations 4000
+  lbfgs_maxfun: 2000      # Maximum function evaluations
+  lbfgs_maxcor: 200       # Maximum variable metric corrections
+  lbfgs_ftol: 2.220446049250313e-09  # Function tolerance (np.finfo(float).eps)
+  lbfgs_gtol: 5.0e-8      # Gradient tolerance
+  lbfgs_maxls: 50         # Maximum line search steps
+
+# Data parameters
+data:
+  input_file: "data.csv"  # cluster data format
+  #input_file: "src/idw_pinn/data/gtDiff2D.mat"  # Path to ground truth data
+  #input_file: "src/idw_pinn/data/intensity_time_series_spatial_temporal.csv"  # Path to ground truth data
+
+  n_u: 200                     # BC/IC points 200
+  n_f: 2000                    # Collocation points (PDE residual) 2000
+  n_obs: 2500                  # Interior observation points (for inverse problem) 2500
+
+# Network architecture
+network:
+  layers: [3, 64, 64, 64, 64, 1]  # [input(x,y,t), hidden..., output(u)] [3, 64, 64, 64, 64, 1] # Test
+
+
+
+
+
+

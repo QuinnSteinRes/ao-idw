@@ -1,0 +1,335 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/scripts/train_2d_inverse.py	2026-02-01 11:58:47
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/scripts/train_2d_inverse.py	2026-01-28 08:11:28
+@@ -33,20 +33,6 @@
+     plot_gradient_histograms  # ADD THIS
+ )
+ 
+-def _as_float(x):
+-    # Handles tf.Variable, tf.Tensor, numpy scalar, python float, and callables
+-    if x is None:
+-        return None
+-    if callable(x):
+-        x = x()
+-    try:
+-        return float(x.numpy())
+-    except Exception:
+-        try:
+-            return float(x)
+-        except Exception:
+-            return None
+-        
+ def setup_environment(seed=123):
+     """
+     Configure reproducibility and TensorFlow environment.
+@@ -68,7 +54,11 @@
+     print("="*70)
+     print(f"\nConfiguration: {config.data.input_file}")
+     
+-    print("True D = Unknown (experimental data)")
++    # Handle case where diff_coeff_true might be None (experimental data)
++    if data.get('diff_coeff_true') is not None:
++        print(f"True D = {data['diff_coeff_true']}")
++    else:
++        print("True D = Unknown (experimental data)")
+     
+     print(f"Initial D guess = {config.physics.diff_coeff_init}")
+ 
+@@ -83,7 +73,11 @@
+     
+     # Configuration
+     print("\n--- Configuration ---")
+-    print(f"  DIFF_COEFF_TRUE     = Unknown")
++    diff_coeff_true = data.get('diff_coeff_true')
++    if diff_coeff_true is not None:
++        print(f"  DIFF_COEFF_TRUE     = {diff_coeff_true}")
++    else:
++        print(f"  DIFF_COEFF_TRUE     = Unknown")
+     print(f"  DIFF_COEFF_INIT     = {config.physics.diff_coeff_init}")
+     print(f"  IDW_EMA_BETA        = {config.idw.ema_beta}")
+     print(f"  IDW_EPS             = {config.idw.eps}")
+@@ -96,32 +90,15 @@
+     # Data
+     print("\n--- Data ---")
+     x, y, t = data['grid']
+-    input_file = getattr(getattr(config, 'data', object()), 'input_file', None)
+-    if input_file is not None:
+-        print(f"  Input file          = {input_file}")
++    print(f"  Input file          = {config.data.input_file}")
+     print(f"  nx={len(x)}, ny={len(y)}, nt={len(t)}")
+     print(f"  Domain: x in [{x.min():.4f},{x.max():.4f}], "
+           f"y in [{y.min():.4f},{y.max():.4f}], "
+           f"t in [{t.min():.4f},{t.max():.4f}]")
+-
+-    # Prefer config values if present; otherwise derive from loaded arrays
+-    n_u_cfg = getattr(getattr(config, 'data', object()), 'n_u', None)
+-    n_u = int(n_u_cfg) if n_u_cfg is not None else (int(data['X_u_train'].shape[0]) if ('X_u_train' in data and data['X_u_train'] is not None) else 0)
+-
+-    n_f_cfg = getattr(getattr(config, 'data', object()), 'n_f', None)
+-    n_f = int(n_f_cfg) if n_f_cfg is not None else (int(data['X_f_train'].shape[0]) if ('X_f_train' in data and data['X_f_train'] is not None) else 0)
+-
+-    n_obs_cfg = getattr(getattr(config, 'data', object()), 'n_obs', None)
+-    n_obs = int(n_obs_cfg) if n_obs_cfg is not None else (int(data['X_obs'].shape[0]) if ('X_obs' in data and data['X_obs'] is not None) else 0)
+-
+-    n_obs_val = int(data['X_obs_val'].shape[0]) if ('X_obs_val' in data and data['X_obs_val'] is not None) else 0
+-
+-    print(f"  N_u (BC/IC points)  = {n_u}")
+-    print(f"  N_f (collocation)   = {n_f}")
+-    print(f"  N_obs (train)       = {n_obs}")
+-    if n_obs_val > 0:
+-        print(f"  N_obs (val)         = {n_obs_val}")
+-
++    print(f"  N_u (BC/IC points)  = {config.data.n_u}")
++    print(f"  N_f (collocation)   = {config.data.n_f}")
++    print(f"  N_obs (interior)    = {config.data.n_obs}")
++    
+     # Metadata (for CSV data)
+     if 'metadata' in data:
+         meta = data['metadata']
+@@ -153,17 +130,14 @@
+     
+     # Results
+     print("\n--- Results ---")
+-    print(f"  D_learned           = {training_results['diff_coeff_learned']:.6f}")
+-    #print(f"  D_error             = {training_results['diff_coeff_error']:.6f} ")
+-    diff_err = training_results.get('diff_coeff_error', None)
+-
+-    if diff_err is not None:
+-        print(f"  D_error             = {diff_err:.6f}")
++    if diff_coeff_true is not None:
++        print(f"  D_true              = {diff_coeff_true}")
++        print(f"  D_learned           = {training_results['diff_coeff_learned']:.6f}")
++        print(f"  D_error             = {training_results['diff_coeff_error']:.6f} "
++              f"({100*training_results['diff_coeff_error']/diff_coeff_true:.2f}%)")
+     else:
+-        print("  D_error             = NA (experimental)")
+-    
+-    print(f"  D_learned           = {training_results['diff_coeff_learned']:.6f}")
+-    print(f"  D_error             = N/A (no ground truth)")
++        print(f"  D_learned           = {training_results['diff_coeff_learned']:.6f}")
++        print(f"  D_error             = N/A (no ground truth)")
+     print(f"  Relative L2 error   = {training_results['final_error']:.5e}")
+     
+     # Unit conversion hint for CSV data
+@@ -183,98 +157,14 @@
+     print(f"  lambda_data         = {final_lam_data:.6f}")
+     print(f"  lambda_f            = {final_lam_f:.6f}")
+     
+-    # Ipred​(x,y,t) = a * uθ​(x,y,t) + b
+-    # --- I_pred(x,y,t) = a*u_theta(x,y,t) + b ---
+-    a = getattr(model, "intensity_scale", None)
+-    b = getattr(model, "intensity_bias", None)
+-    
+-    a_val = _as_float(a)
+-    b_val = _as_float(b)
+-
+-    print("\n--- I_pred(x,y,t) = a * u_theta(x,y,t) + b ---")
+-    print(f"a (intensity scale) = {a_val:.6g}" if a_val is not None else "a (intensity scale) = NA")
+-    print(f"b (intensity bias)  = {b_val:.6g}" if b_val is not None else "b (intensity bias)  = NA")
+-    
+-    
+     # Output Files
+     print("\n--- Output Files ---")
+     print(f"  {output_dir}/diff2D_IDW_inverse.png")
+     print(f"  {output_dir}/inverse_diagnostics_2D.png")
+     
+     print("="*70)
+-
+-
+-def plot_time_slices_with_val(model, data, output_dir, nx=150, ny=150, prefix="pred"):
+-    """Prediction-only plots for experimental pointcloud data.
+-    For each time in data['grid'], evaluate model on an (x,y) grid, overlay held-out validation points (if any),
+-    and save figures as {prefix}_t{time:.1f}.png in output_dir.
+-    Uses intensity-space prediction if available (evaluate_intensity or predict_observation).
+-    """
+-    import os
+-    import numpy as np
+-    import matplotlib.pyplot as plt
+-
+-    os.makedirs(output_dir, exist_ok=True)
+-
+-    # Build grid if missing
+-    if data.get("grid", None) is None:
+-        # derive bounds from available points
+-        X_list = []
+-        for k in ["X_obs", "X_obs_val", "X_u_test", "X_f_train"]:
+-            if k in data and data[k] is not None and len(data[k]) > 0:
+-                X_list.append(data[k])
+-        if not X_list:
+-            raise ValueError("Cannot build grid: no point data found.")
+-        X_all = np.vstack(X_list)
+-        x_min, x_max = float(np.min(X_all[:,0])), float(np.max(X_all[:,0]))
+-        y_min, y_max = float(np.min(X_all[:,1])), float(np.max(X_all[:,1]))
+-        t_vals = np.unique(X_all[:,2])
+-        x = np.linspace(x_min, x_max, nx)
+-        y = np.linspace(y_min, y_max, ny)
+-        data["grid"] = (x, y, t_vals)
+-
+-    x, y, t_vals = data["grid"]
+-    x = np.asarray(x); y = np.asarray(y); t_vals = np.asarray(t_vals)
+-
+-    # evaluator
+-    eval_fn = getattr(model, "evaluate_intensity", None) or getattr(model, "predict_observation", None) or model.evaluate
+-
+-    # validation points
+-    Xv = data.get("X_obs_val", None)
+-    have_val = Xv is not None and len(Xv) > 0
+-
+-    XX, YY = np.meshgrid(x, y, indexing="xy")
+-    XY = np.stack([XX.ravel(), YY.ravel()], axis=1)
+ 
+-    for ti in t_vals:
+-        tt = np.full((XY.shape[0], 1), float(ti))
+-        Xq = np.hstack([XY, tt])
+-        pred = eval_fn(Xq)
+-        pred = np.asarray(pred).reshape(-1,)
+-        ZZ = pred.reshape(len(y), len(x))
+ 
+-        fig = plt.figure()
+-        plt.imshow(
+-            ZZ,
+-            origin="lower",
+-            extent=[x.min(), x.max(), y.min(), y.max()],
+-            aspect="auto",
+-        )
+-        plt.colorbar()
+-        plt.title(f"Prediction (intensity) at t={float(ti):g}")
+-        plt.xlabel("x"); plt.ylabel("y")
+-
+-        if have_val:
+-            Xv_arr = np.asarray(Xv)
+-            mask = np.isclose(Xv_arr[:,2], float(ti))
+-            if np.any(mask):
+-                plt.scatter(Xv_arr[mask,0], Xv_arr[mask,1], s=8)
+-
+-        fname = os.path.join(output_dir, f"{prefix}_t{float(ti):.1f}.png")
+-        plt.tight_layout()
+-        plt.savefig(fname, dpi=200)
+-        plt.close(fig)
+-        
+ def main():
+     """Main execution flow."""
+     # Parse command line arguments
+@@ -309,29 +199,15 @@
+     # Create model
+     print("\n--- Initializing Model ---")
+     lb, ub = data['bounds']
+-    # Enable a learnable affine mapping from NN output (physical field) to
+-    # observed intensity when using masked experimental pointcloud CSVs.
+-    model_cfg = getattr(config, 'model', None)
+-    intensity_scaling_enabled = bool(getattr(model_cfg, 'intensity_scaling_enabled', False))
+-    if data.get('metadata', {}).get('csv_mode') == 'pointcloud':
+-        intensity_scaling_enabled = True
+     model = PINN(
+         layers=config.network.layers,
+         lb=lb,
+         ub=ub,
+         diff_coeff_init=config.physics.diff_coeff_init,
+-        idw_config=config,
+-        intensity_scaling_enabled=intensity_scaling_enabled,
+-        intensity_scale_init=float(getattr(model_cfg, 'intensity_scale_init', 1.0)),
+-        intensity_bias_init=float(getattr(model_cfg, 'intensity_bias_init', 0.0)),
++        idw_config=config
+     )
+     print(f"Network: {config.network.layers}")
+-    extra = 1  # diff_coeff
+-    if intensity_scaling_enabled:
+-        extra += 2  # a_raw, b
+-    print(f"Total parameters: {model.parameters + extra}")
+-    if intensity_scaling_enabled:
+-        print("Observation mapping: I = a*u + b (a>0 via softplus)")
++    print(f"Total parameters: {model.parameters + 1}")  # +1 for diff_coeff
+     
+     config.output_dir = args.output_dir
+ 
+@@ -365,71 +241,33 @@
+     # Generate visualizations
+     print("\n--- Generating Visualizations ---")
+     os.makedirs(args.output_dir, exist_ok=True)
++    
++    # Solution comparison plot
++    u_pred = model.evaluate(data['X_u_test']).numpy()
++    x, y, t = data['grid']
++    
++    diff_coeff_true = data.get('diff_coeff_true')
++    if diff_coeff_true is None:
++        diff_coeff_true = training_results['diff_coeff_learned']  # Use learned as placeholder
++    
++    plot_2d_solution_comparison(
++    u_pred=u_pred,
++    usol=data['usol'],
++    x=x,
++    y=y,
++    t=t,
++    diff_coeff_learned=training_results['diff_coeff_learned'],
++    diff_coeff_true=diff_coeff_true,
++    output_dir=args.output_dir
++    )
+ 
+-    # ------------------------------------------------------------------
+-    # Build a grid for visualization if not provided by the data loader
+-    # ------------------------------------------------------------------
+-    if data.get('grid', None) is None:
+-        X_list = []
+-        for k in ['X_obs', 'X_obs_val', 'X_u_test', 'X_f_train']:
+-            if k in data and data[k] is not None and len(data[k]) > 0:
+-                X_list.append(data[k])
+-        if len(X_list) == 0:
+-            raise ValueError("Cannot build visualization grid: no point arrays found.")
+-        X_all = np.vstack(X_list)
+-
+-        x_min, x_max = float(np.min(X_all[:, 0])), float(np.max(X_all[:, 0]))
+-        y_min, y_max = float(np.min(X_all[:, 1])), float(np.max(X_all[:, 1]))
+-        t_vals = np.unique(X_all[:, 2])
+-
+-        nx = 150
+-        ny = 150
+-        x = np.linspace(x_min, x_max, nx)
+-        y = np.linspace(y_min, y_max, ny)
+-        t = t_vals
+-        data['grid'] = (x, y, t)
+-
+-    # Experimental/pointcloud mode: no ground-truth solution grid
+-    is_pointcloud = (data.get('metadata', {}).get('csv_mode') == 'pointcloud')
+-    if is_pointcloud or data.get('usol', None) is None:
+-        viz_dir = os.path.join(args.output_dir, "viz_slices")
+-        plot_time_slices_with_val(model, data, viz_dir, nx=150, ny=150, prefix="pred")
+-        print(f"[viz] Saved prediction-only slices to: {viz_dir}")
+-        diff_coeff_true = None
+-    else:
+-        # Synthetic mode: compare to ground truth on grid
+-        x, y, t = data['grid']
+-        XX, YY = np.meshgrid(x, y, indexing='xy')
+-        XY = np.stack([XX.ravel(), YY.ravel()], axis=1)
+-        # assume single time t if scalar, else use first for comparison plotting
+-        t0 = float(t[0]) if hasattr(t, '__len__') else float(t)
+-        tt = np.full((XY.shape[0], 1), t0)
+-        Xq = np.hstack([XY, tt])
+-
+-        eval_fn = getattr(model, "evaluate_intensity", None) or getattr(model, "predict_observation", None) or model.evaluate
+-        u_pred = np.asarray(eval_fn(Xq)).reshape(-1,)
+-
+-        diff_coeff_true = data.get('diff_coeff_true', None)
+-
+-        plot_2d_solution_comparison(
+-            u_pred=u_pred,
+-            usol=data['usol'],
+-            x=x,
+-            y=y,
+-            t=t0,
+-            diff_coeff_learned=training_results['diff_coeff_learned'],
+-            diff_coeff_true=diff_coeff_true,
+-            output_dir=args.output_dir
+-        )
+-
+-    # Training diagnostics
+     plot_training_diagnostics(
+         history_adam=training_results['history'],
+         history_lbfgs=training_results['history_lbfgs'],
+         diff_coeff_true=diff_coeff_true,
+         output_dir=args.output_dir
+     )
+-
++    
+     # Print comprehensive summary
+     print_final_summary(config, data, model, training_results, args.output_dir)
+ 

@@ -1,0 +1,268 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/src/idw_pinn/training/trainer.py	2026-01-31 02:27:21
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/src/idw_pinn/training/trainer.py	2026-01-28 08:11:28
+@@ -86,38 +86,6 @@
+         
+         # L-BFGS tracking
+         self.lbfgs_iter = 0
+-
+-
+-    def _relL2_intensity_val(self):
+-        """Held-out validation relL2 in observation (intensity) space.
+-
+-        relL2_I = ||I_val - I_pred||_2 / ||I_val||_2
+-        where I_pred = a*u_pred + b if intensity scaling is enabled.
+-
+-        Returns None if no validation set is present.
+-        """
+-        if ('X_obs_val' not in self.data) or ('u_obs_val' not in self.data):
+-            return None
+-        Xv = self.data['X_obs_val']
+-        yv = self.data['u_obs_val']
+-        if Xv is None or len(Xv) == 0:
+-            return None
+-
+-        try:
+-            ypred = self.model.evaluate_intensity(Xv)
+-        except Exception:
+-            # Fallback: evaluate() gives u; if scaling exists use predict_observation()
+-            try:
+-                ypred = self.model.predict_observation(Xv)
+-            except Exception:
+-                ypred = self.model.evaluate(Xv)
+-
+-        ypred = np.asarray(ypred).reshape(-1,)
+-        yv = np.asarray(yv).reshape(-1,)
+-        denom = np.linalg.norm(yv, 2)
+-        if denom <= 0:
+-            return None
+-        return float(np.linalg.norm(yv - ypred, 2) / denom)
+         self.lbfgs_last_print_time = None
+     
+     def _train_step(self):
+@@ -193,39 +161,17 @@
+                 current_time = time.time()
+                 elapsed = current_time - last_print_time
+                 last_print_time = current_time
+-
+-                # Held-out validation fit (10%) in intensity space
+-                fit_val = self._relL2_intensity_val()
+-                fit_str = f"{fit_val:.3e}" if fit_val is not None else "NA"
+                 
+-                # -------------------------
+-                # Compute (optional) test error
+-                # -------------------------
+-                err_tmp = None
+-                if ('X_u_test' in self.data) and ('u_test' in self.data):
+-                    try:
+-                        u_pred_tmp = self.model.evaluate(self.data['X_u_test'])
+-                        denom = np.linalg.norm(self.data['u_test'], 2)
+-                        if denom > 0:
+-                            err_tmp = np.linalg.norm((self.data['u_test'] - u_pred_tmp), 2) / denom
+-                    except Exception as e:
+-                        print(f"Warning: could not compute relL2 test error: {e}")
+-                        err_tmp = None
+-
+-                # -------------------------
+-                # Diffusion coefficient error (only if ground truth exists)
+-                # -------------------------
+-                d_pred = float(self.model.diff_coeff.numpy())
+-                d_true = self.data.get("diff_coeff_true", None)
+-                if d_true is not None:
+-                    diff_err = d_pred - float(d_true)
+-                    derr_str = f"{diff_err:.4f}"
+-                else:
+-                    derr_str = "NA"
+-
+-                # -------------------------
+-                # Logging
+-                # -------------------------
++                # Compute test error
++                u_pred_tmp = self.model.evaluate(self.data['X_u_test'])
++                err_tmp = np.linalg.norm(
++                    (self.data['u_test'] - u_pred_tmp), 2
++                ) / np.linalg.norm(self.data['u_test'], 2)
++                
++                diff_err = np.abs(
++                    self.model.diff_coeff.numpy() - self.data['diff_coeff_true']
++                )
++                
+                 print(f"[Adam {epoch:5d}] L={loss_val.numpy():.3e}  "
+                       f"Lbc={L_bc.numpy():.3e}  "
+                       f"Ldata={L_data.numpy():.3e}  "
+@@ -233,15 +179,9 @@
+                 print(f"             lam_bc={lam_bc.numpy():.3e}  "
+                       f"lam_data={lam_data.numpy():.3e}  "
+                       f"lam_f={lam_f.numpy():.3e}")
+-
+-                if fit_val is not None:
+-                    print(f"             fit_val_I={fit_str}  D={d_pred:.6g}  D_err={derr_str}  dt={elapsed:.1f}s")
+-                elif err_tmp is not None:
+-                    print(f"             relL2={err_tmp:.3e}  D={d_pred:.6g}  D_err={derr_str}  dt={elapsed:.1f}s")
+-                else:
+-                    print(f"             D={d_pred:.6g}  D_err={derr_str}  dt={elapsed:.1f}s")
+-                
+-                      
++                print(f"             relL2={err_tmp:.3e}  "
++                      f"D={self.model.diff_coeff.numpy():.4f}  "
++                      f"D_err={diff_err:.4f}  dt={elapsed:.1f}s")
+         
+         adam_total_time = time.time() - adam_start_time
+         print(f"\nAdam phase completed in {adam_total_time:.2f}s")
+@@ -315,16 +255,12 @@
+     def _lbfgs_callback(self, parameters):
+         """
+         Callback for L-BFGS optimizer - logs progress and records history.
+-
++        
+         Args:
+             parameters: Current parameter vector from scipy
+         """
+         self.lbfgs_iter += 1
+-
+-        # Held-out validation fit (10%) in intensity space
+-        fit_val = self._relL2_intensity_val()
+-        fit_str = f"{fit_val:.3e}" if fit_val is not None else "NA"
+-
++        
+         loss_value, loss_bc, loss_data, loss_f, lam_bc, lam_data, lam_f = loss(
+             self.model,
+             self.data['X_u_train'],
+@@ -334,28 +270,16 @@
+             self.data['X_f_train'],
+             self.config
+         )
+-
+-        # Optional test error (only if present)
+-        error_vec = None
+-        if ('X_u_test' in self.data) and ('u_test' in self.data):
+-            try:
+-                u_pred = self.model.evaluate(self.data['X_u_test'])
+-                denom = np.linalg.norm(self.data['u_test'], 2)
+-                if denom > 0:
+-                    error_vec = np.linalg.norm((self.data['u_test'] - u_pred), 2) / denom
+-            except Exception as e:
+-                print(f"Warning: could not compute relL2 test error in L-BFGS callback: {e}")
+-                error_vec = None
+-
+-        # Diffusion coefficient error (only if ground truth exists)
+-        d_pred = float(self.model.diff_coeff.numpy())
+-        d_true = self.data.get("diff_coeff_true", None)
+-        if d_true is not None:
+-            diff_error = d_pred - float(d_true)
+-            derr_str = f"{diff_error:.4f}"
+-        else:
+-            derr_str = "NA"
+-
++        
++        u_pred = self.model.evaluate(self.data['X_u_test'])
++        error_vec = np.linalg.norm(
++            (self.data['u_test'] - u_pred), 2
++        ) / np.linalg.norm(self.data['u_test'], 2)
++        
++        diff_error = np.abs(
++            self.model.diff_coeff.numpy() - self.data['diff_coeff_true']
++        )
++        
+         # Record histories
+         self.history_lbfgs['diff_coeff'].append(self.model.diff_coeff.numpy())
+         self.history_lbfgs['loss_bc'].append(loss_bc.numpy())
+@@ -364,7 +288,7 @@
+         self.history_lbfgs['lam_bc'].append(lam_bc.numpy())
+         self.history_lbfgs['lam_data'].append(lam_data.numpy())
+         self.history_lbfgs['lam_f'].append(lam_f.numpy())
+-
++        
+         # Print every PRINT_EVERY iterations
+         print_every = self.config.training.print_every
+         if self.lbfgs_iter % print_every == 0 or self.lbfgs_iter == 1:
+@@ -375,7 +299,7 @@
+             else:
+                 time_str = ""
+             self.lbfgs_last_print_time = current_time
+-
++            
+             print(f"[L-BFGS {self.lbfgs_iter:5d}] L={loss_value.numpy():.3e}  "
+                   f"Lbc={loss_bc.numpy():.3e}  "
+                   f"Ldata={loss_data.numpy():.3e}  "
+@@ -383,13 +307,9 @@
+             print(f"              lam_bc={lam_bc.numpy():.3e}  "
+                   f"lam_data={lam_data.numpy():.3e}  "
+                   f"lam_f={lam_f.numpy():.3e}")
+-
+-            if fit_val is not None:
+-                print(f"              fit_val_I={fit_str}  D={d_pred:.6g}  D_err={derr_str}{time_str}")
+-            elif error_vec is not None:
+-                print(f"              relL2={error_vec:.3e}  D={d_pred:.6g}  D_err={derr_str}{time_str}")
+-            else:
+-                print(f"              D={d_pred:.6g}  D_err={derr_str}{time_str}")
++            print(f"              relL2={error_vec:.3e}  "
++                  f"D={self.model.diff_coeff.numpy():.4f}  "
++                  f"D_err={diff_error:.4f}{time_str}")
+     
+     def train_lbfgs(self):
+         """
+@@ -473,55 +393,21 @@
+             (self.data['u_test'] - u_pred), 2
+         ) / np.linalg.norm(self.data['u_test'], 2)
+         
+-        #diff_coeff_learned = self.model.diff_coeff.numpy()
+-        #diff_coeff_error = np.abs(
+-        #    diff_coeff_learned - self.data['diff_coeff_true']
+-        #)
+-        diff_coeff_learned = float(self.model.diff_coeff.numpy())
+-        d_true = self.data.get("diff_coeff_true", None)
+-
+-        if d_true is not None:
+-            diff_coeff_error = diff_coeff_learned - float(d_true)
+-        else:
+-            diff_coeff_error = None
++        diff_coeff_learned = self.model.diff_coeff.numpy()
++        diff_coeff_error = np.abs(
++            diff_coeff_learned - self.data['diff_coeff_true']
++        )
+         
+-        
+         print("\n" + "="*70)
+         print("TRAINING COMPLETED")
+         print("="*70)
+         print(f"Total time: {adam_time + lbfgs_time:.2f}s "
+               f"(Adam: {adam_time:.2f}s, L-BFGS: {lbfgs_time:.2f}s)")
+-        fit_val = self._relL2_intensity_val()
+-        if fit_val is not None:
+-            print(f"Final fit (held-out 10%) relL2 in intensity space: {fit_val:.6e}")
+-        else:
+-            print(f"Final relL2 error: {final_error:.5e}")
+-        #print(f"D_true: {self.data['diff_coeff_true']:.6f}")
+-        d_pred = float(self.model.diff_coeff.numpy())
+-        d_true = self.data.get("diff_coeff_true", None)
+-
+-        print(f"D_learned: {d_pred:.6g}")
+-
+-        if d_true is not None:
+-            d_true_f = float(d_true)
+-            print(f"D_true:   {d_true_f:.6g}")
+-            print(f"D_error:  {d_pred - d_true_f:.3g}")
+-        else:
+-            print("D_true:   NA (experimental)")
+-        
+-        #print(f"D_learned: {diff_coeff_learned:.6f}")
+-        if diff_coeff_error is not None:
+-            print(f"D learned: {diff_coeff_learned:.6g} (error {diff_coeff_error:.3g})")
+-        else:
+-            print(f"D learned: {diff_coeff_learned:.6g} (experimental: no ground truth)")
+-        
+-        #print(f"D_error: {diff_coeff_error:.6f} "
+-        #      f"({100*diff_coeff_error/self.data['diff_coeff_true']:.2f}%)")
+-        if diff_coeff_error is not None:
+-            print(f"D_error: {diff_coeff_error:.6f} "
+-                  f"(relative error {rel_error:.3e})")
+-        else:
+-            print("D_error: NA (experimental)")
++        print(f"Final relL2 error: {final_error:.5e}")
++        print(f"D_true: {self.data['diff_coeff_true']:.6f}")
++        print(f"D_learned: {diff_coeff_learned:.6f}")
++        print(f"D_error: {diff_coeff_error:.6f} "
++              f"({100*diff_coeff_error/self.data['diff_coeff_true']:.2f}%)")
+         print("="*70)
+         
+         return {

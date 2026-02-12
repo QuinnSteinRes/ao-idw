@@ -1,0 +1,95 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/src/idw_pinn/utils/visualization.py	2026-02-01 08:24:29
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/src/idw_pinn/utils/visualization.py	2026-01-28 08:11:28
+@@ -43,8 +43,7 @@
+ 
+ # Hardcoded axis limits for cross-run consistency (all log scale)
+ AXIS_LIMITS = {
+-    #'D_evolution': (1e-5, 1),
+-    'D_evolution': (1e-8, 1),
++    'D_evolution': (1e-5, 1),
+     'D_error': (1e-5, 1e5),
+     'losses': (1e-12, 1e2),
+     'lambdas': (1e-3, 1e5),
+@@ -266,71 +265,7 @@
+     # Reshape prediction to match solution shape if needed
+     if u_pred.ndim == 2 and u_pred.shape[1] == 1:
+         u_pred = u_pred.flatten()
+-    
+     
+-    # -------------------------------------------------------------------------
+-    # Experimental / pointcloud mode: no ground-truth grid provided (usol is None)
+-    # Fall back to prediction-only plots on the provided (x, y, t) grid.
+-    # -------------------------------------------------------------------------
+-    if usol is None:
+-        os.makedirs(output_dir, exist_ok=True)
+-
+-        nx = len(x)
+-        ny = len(y)
+-        nt = len(t)
+-
+-        u_arr = np.asarray(u_pred)
+-
+-        # Try to reshape u_pred into a 3D grid [ny, nx, nt] (or [nx, ny, nt])
+-        if u_arr.ndim == 1:
+-            if u_arr.size == nx * ny * nt:
+-                # Prefer [ny, nx, nt] for imshow with extent=[x_min,x_max,y_min,y_max]
+-                try:
+-                    u_grid = np.reshape(u_arr, (ny, nx, nt), order='C')
+-                except Exception:
+-                    u_grid = np.reshape(u_arr, (nx, ny, nt), order='C').transpose(1, 0, 2)
+-            elif u_arr.size == (nx * ny):
+-                # Single time slice only
+-                u_grid = np.reshape(u_arr, (ny, nx, 1), order='C')
+-                nt = 1
+-            else:
+-                raise ValueError(
+-                    f"u_pred has size {u_arr.size}, but expected nx*ny*nt={nx*ny*nt} (or nx*ny={nx*ny})."
+-                )
+-        elif u_arr.ndim == 2:
+-            # Assume already [ny, nx] single slice
+-            u_grid = u_arr.reshape(ny, nx, 1)
+-            nt = 1
+-        elif u_arr.ndim == 3:
+-            u_grid = u_arr
+-        else:
+-            u_grid = np.reshape(u_arr, (ny, nx, nt), order='C')
+-
+-        # Decide which time indices to plot: all if <= 6, else 4 evenly spaced.
+-        if nt <= 6:
+-            time_ids = list(range(nt))
+-        else:
+-            time_ids = [0, nt // 3, (2 * nt) // 3, nt - 1]
+-
+-        for k in time_ids:
+-            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+-            im = ax.imshow(
+-                u_grid[:, :, k],
+-                origin='lower',
+-                extent=[float(np.min(x)), float(np.max(x)), float(np.min(y)), float(np.max(y))],
+-                aspect='auto'
+-            )
+-            fig.colorbar(im, ax=ax)
+-            ax.set_title(f"Prediction (no ground truth) at t={float(t[k]):g}")
+-            ax.set_xlabel('x')
+-            ax.set_ylabel('y')
+-            fig.tight_layout()
+-
+-            fname = filename if (filename is not None and nt == 1) else f"pred_only_t{float(t[k]):.1f}.png"
+-            fig.savefig(os.path.join(output_dir, fname), dpi=200)
+-            plt.close(fig)
+-
+-        return
+     if u_pred.ndim == 1:
+         u_pred_reshaped = np.reshape(u_pred, usol.shape, order='C')
+     else:
+@@ -1203,9 +1138,7 @@
+     variances = [s['variance'] for s in stats.values()]
+     max_var, min_var = max(variances), min(v for v in variances if v > 0)
+     var_ratio = max_var / min_var if min_var > 0 else float('inf')
+-    if not np.isfinite(var_ratio):
+-        var_ratio = 1.0  # treat as balanced for logging
+-        
++    
+     print(f"\nGradient Balance (epoch {epoch}):")
+     print(f"  Variance ratio: {var_ratio:.1e}")
+     if var_ratio > 1000:

@@ -1,0 +1,170 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/src/idw_pinn/losses/pde_losses.py	2026-01-30 09:05:19
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/src/idw_pinn/losses/pde_losses.py	2026-01-28 08:11:28
+@@ -23,13 +23,6 @@
+     Returns:
+         Scalar loss tensor
+     """
+-    # If BC/IC is not used (empty arrays), return zero.
+-    if x_bc is None or y_bc is None:
+-        return tf.constant(0.0, dtype=tf.float64)
+-    if tf.size(x_bc) == 0:
+-        return tf.constant(0.0, dtype=tf.float64)
+-    # Boundary/initial conditions usually correspond to the physical field u
+-    # (not the observation/intensity mapping). We therefore use model.evaluate.
+     loss_u = tf.reduce_mean(tf.square(y_bc - model.evaluate(x_bc)))
+     return loss_u
+ 
+@@ -46,10 +39,7 @@
+     Returns:
+         Scalar loss tensor
+     """
+-    # Interior observations may be in *intensity* space; if the model has
+-    # intensity scaling enabled, map NN output to observation space.
+-    pred = model.predict_observation(x_obs) if hasattr(model, "predict_observation") else model.evaluate(x_obs)
+-    loss_data = tf.reduce_mean(tf.square(u_obs - pred))
++    loss_data = tf.reduce_mean(tf.square(u_obs - model.evaluate(x_obs)))
+     return loss_data
+ 
+ 
+@@ -137,99 +127,64 @@
+ 
+ def _compute_idw_weights(model, x_bc, y_bc, x_obs, u_obs, x_f, config):
+     """
+-    Compute inverse-Dirichlet weights based on gradient energies (IDW).
+-
+-    Key behavior for experimental pointcloud runs:
+-    - If there are NO BC/IC samples (n_u == 0), we *drop* the BC/IC term from
+-      the weighting (lam_bc = 0) and normalize only over (data, PDE).
+-    - The target sum of lambdas is chosen automatically as the number of
+-      *active* loss components (2 or 3), so you do not need to specify it
+-      in the YAML.
+-
++    Compute inverse-Dirichlet weights based on gradient energies.
++    
++    Updates model's EMA trackers (g2_bc, g2_data, g2_f) and computes
++    normalized weights that sum to weight_sum_target.
++    
++    Args:
++        model: PINN model instance
++        x_bc, y_bc: BC/IC data
++        x_obs, u_obs: Observation data
++        x_f: Collocation points
++        config: Config object with IDW parameters
++        
+     Returns:
+-        (lam_bc, lam_data, lam_f) as float64 tensors.
++        Tuple of (lam_bc, lam_data, lam_f) weight tensors
+     """
+-    # Uniform weights mode
+-    if hasattr(config.idw, 'enabled') and not config.idw.enabled:
+-        one = tf.constant(1.0, dtype=tf.float64)
+-        return one, one, one
+ 
+-    # Determine which components are active from sample counts
+-    def _has_samples(x):
+-            if x is None:
+-                return False
+-            # Works for numpy arrays and tensors with known leading dimension
+-            n0 = getattr(x, 'shape', [None])[0]
+-            if n0 is None:
+-                return False
+-            return int(n0) > 0
+-
+-    has_bc = _has_samples(x_bc) and _has_samples(y_bc)
+-    has_data = _has_samples(x_obs) and _has_samples(u_obs)
+-    has_f = _has_samples(x_f)
+-
+-    # Compute gradient energies ONLY for active components
+-    if has_bc:
+-        g2_bc = _grad_energy(model, lambda: loss_BC(model, x_bc, y_bc))
+-        beta = model.beta
+-        model.g2_bc.assign(beta * model.g2_bc + (1.0 - beta) * g2_bc)
+-
+-    if has_data:
+-        g2_data = _grad_energy(model, lambda: loss_Data(model, x_obs, u_obs))
+-        beta = model.beta
+-        model.g2_data.assign(beta * model.g2_data + (1.0 - beta) * g2_data)
+-
+-    if has_f:
+-        g2_f = _grad_energy(model, lambda: loss_PDE(model, x_f))
+-        beta = model.beta
+-        model.g2_f.assign(beta * model.g2_f + (1.0 - beta) * g2_f)
+-
++        # Check if IDW is disabled (uniform weights mode)
++    if hasattr(config.idw, 'enabled') and not config.idw.enabled:
++        return (tf.constant(1.0, dtype=tf.float64),
++                tf.constant(1.0, dtype=tf.float64),
++                tf.constant(1.0, dtype=tf.float64))
++    
++    # Compute gradient energies for each loss component
++    g2_bc = _grad_energy(model, lambda: loss_BC(model, x_bc, y_bc))
++    g2_data = _grad_energy(model, lambda: loss_Data(model, x_obs, u_obs))
++    g2_f = _grad_energy(model, lambda: loss_PDE(model, x_f))
++    
++    # EMA update of gradient energy trackers
++    beta = model.beta
++    model.g2_bc.assign(beta * model.g2_bc + (1.0 - beta) * g2_bc)
++    model.g2_data.assign(beta * model.g2_data + (1.0 - beta) * g2_data)
++    model.g2_f.assign(beta * model.g2_f + (1.0 - beta) * g2_f)
++    
+     # Inverse-Dirichlet raw weights: 1 / (g2 + eps)
+     epsw = model.epsw
+-    w_bc = tf.constant(0.0, dtype=tf.float64)
+-    w_data = tf.constant(0.0, dtype=tf.float64)
+-    w_f = tf.constant(0.0, dtype=tf.float64)
+-
+-    if has_bc:
+-        w_bc = 1.0 / (model.g2_bc + epsw)
+-    if has_data:
+-        w_data = 1.0 / (model.g2_data + epsw)
+-    if has_f:
+-        w_f = 1.0 / (model.g2_f + epsw)
+-
+-    # Clamp for stability (only affects active weights)
++    w_bc = 1.0 / (model.g2_bc + epsw)
++    w_data = 1.0 / (model.g2_data + epsw)
++    w_f = 1.0 / (model.g2_f + epsw)
++    
++    # Clamp for stability
+     clamp_min = config.idw.clamp_min
+     clamp_max = config.idw.clamp_max
+     w_bc = tf.clip_by_value(w_bc, clamp_min, clamp_max)
+     w_data = tf.clip_by_value(w_data, clamp_min, clamp_max)
+     w_f = tf.clip_by_value(w_f, clamp_min, clamp_max)
+-
+-    # Drop BC weighting entirely if no BC samples
+-    if not has_bc:
+-        w_bc = tf.constant(0.0, dtype=tf.float64)
+-
+-    # Normalize over active components
+-    s = w_bc + w_data + w_f + tf.constant(1e-300, dtype=tf.float64)
+-
+-    # Target sum chosen automatically (#active terms: 2 or 3)
+-    n_active = int(has_bc) + int(has_data) + int(has_f)
+-    if n_active <= 0:
+-        n_active = 1
+-    target = tf.constant(float(n_active), dtype=tf.float64)
+-
++    
++    # Normalize to fixed sum
++    s = w_bc + w_data + w_f
++    target = model.weight_sum_target
+     lam_bc = target * w_bc / s
+     lam_data = target * w_data / s
+     lam_f = target * w_f / s
+-
+-    # If BC is inactive, guarantee lam_bc==0 exactly
+-    if not has_bc:
+-        lam_bc = tf.constant(0.0, dtype=tf.float64)
+-
+-    # Stop gradient so weights are not optimized
++    
++    # Stop gradient to prevent weights from being optimized
+     lam_bc = tf.stop_gradient(lam_bc)
+     lam_data = tf.stop_gradient(lam_data)
+     lam_f = tf.stop_gradient(lam_f)
+-
++    
+     return lam_bc, lam_data, lam_f
+ 
+ 

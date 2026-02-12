@@ -1,0 +1,24 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/src/idw_pinn/utils/plotting/gradients.py	2026-01-30 12:32:42
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/src/idw_pinn/utils/plotting/gradients.py	2026-01-28 08:11:28
+@@ -137,16 +137,14 @@
+     variances = [s['variance'] for s in stats.values()]
+     max_var, min_var = max(variances), min(v for v in variances if v > 0)
+     var_ratio = max_var / min_var if min_var > 0 else float('inf')
+-    if not np.isfinite(var_ratio):
+-        var_ratio = 1.0  # treat as balanced for logging
+-        
++    
+     print(f"\nGradient Balance (epoch {epoch}):")
+     print(f"  Variance ratio: {var_ratio:.1e}")
+     if var_ratio > 1000:
+-        print(f"  SEVERE imbalance - vanishing task-specific gradients!")
++        print(f"  ⚠️  SEVERE imbalance - vanishing task-specific gradients!")
+     elif var_ratio > 100:
+-        print(f"  Moderate imbalance")
++        print(f"  ⚠️  Moderate imbalance")
+     else:
+-        print(f"  OK, reasonably balanced")
++        print(f"  ✓  Reasonably balanced")
+     
+     return {'figure': fig, 'stats': stats, 'filepath': filepath}
+\ No newline at end of file

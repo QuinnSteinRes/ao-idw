@@ -1,0 +1,11 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/setup.py	2026-02-02 08:34:08
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/setup.py	2026-01-28 08:11:28
+@@ -1,7 +1,7 @@
+ from setuptools import setup, find_packages
+ 
+ setup(
+-    name="intensityPINNIDW",
++    name="idw_pinn",
+     version="0.1.0",
+     description="Inverse-Dirichlet Weighted Physics-Informed Neural Networks",
+     author="Quinn",

@@ -1,0 +1,148 @@
+--- /Users/ao57/Desktop/QuinnPINNs/Code/IntensityIDW/src/idw_pinn/data/csv_loader.py	2026-01-31 02:19:41
++++ /Users/ao57/Desktop/QuinnPINNs/Code/IDW-main/src/idw_pinn/data/csv_loader.py	2026-01-28 08:11:28
+@@ -15,127 +15,11 @@
+ """
+ import numpy as np
+ import pandas as pd
+-
+-def _stratified_split_by_time(X: np.ndarray, u: np.ndarray, val_frac: float = 0.10, seed: int = 1234):
+-    """Stratified train/val split by unique time values in X[:,2]."""
+-    if X is None or len(X) == 0:
+-        return X, u, np.zeros((0, 3), dtype=float), np.zeros((0, 1), dtype=float)
+-
+-    rng = np.random.default_rng(seed)
+-    tvals = X[:, 2]
+-    uniq = np.unique(tvals)
+-
+-    train_idx = []
+-    val_idx = []
+-    for t in uniq:
+-        idx = np.where(tvals == t)[0]
+-        if len(idx) == 0:
+-            continue
+-        rng.shuffle(idx)
+-        n_val = max(1, int(round(val_frac * len(idx))))
+-        val_idx.append(idx[:n_val])
+-        train_idx.append(idx[n_val:])
+-
+-    train_idx = np.concatenate(train_idx) if len(train_idx) else np.array([], dtype=int)
+-    val_idx = np.concatenate(val_idx) if len(val_idx) else np.array([], dtype=int)
+-
+-    return X[train_idx], u[train_idx], X[val_idx], u[val_idx]
+-
+ from pathlib import Path
+ from pyDOE import lhs
+ from scipy.interpolate import griddata
+-
+-
+-def load_pointcloud_csv_data(config, df=None, csv_path=None):
+-    """Load a point-cloud CSV exported from the masking pipeline.
+-
+-    Expected columns: x, y, t, u
+-
+-    - x, y are already normalized to [0,1] in the dish bounding box
+-    - t is in seconds (or whatever physical time unit you choose)
+-    - u is normalized intensity in [0,1]
+-
+-    This loader intentionally does **not** invent rectangular boundary conditions.
+-    It returns empty BC/IC arrays by default and uses the CSV points as the
+-    interior observation set.
+-    """
+-    if df is None:
+-        csv_path = Path(config.data.input_file) if csv_path is None else csv_path
+-        df = pd.read_csv(csv_path)
+-    if csv_path is None:
+-        csv_path = Path(getattr(config.data, 'input_file', 'dataset.csv'))
+-
+-    required_cols = ['x', 'y', 't']
+-    for c in required_cols:
+-        if c not in df.columns:
+-            raise ValueError(f"Missing required column: {c}")
+-    # Observation column can be either 'u' or 'intensity'
+-    obs_col = 'u' if 'u' in df.columns else 'intensity' if 'intensity' in df.columns else None
+-    if obs_col is None:
+-        raise ValueError("Pointcloud CSV must contain column 'u' (preferred) or 'intensity'")
+-
+-    X_all = df[['x', 'y', 't']].to_numpy(dtype=float)
+-    u_all = df[[obs_col]].to_numpy(dtype=float)
+-
+-    # Optional subsampling for very large point clouds
+-    n_obs = getattr(config.data, 'n_obs', None)
+-    max_obs = getattr(config.data, 'max_obs', None)
+-    target = None
+-    if isinstance(n_obs, (int, np.integer)) and n_obs > 0:
+-        target = int(n_obs)
+-    if isinstance(max_obs, (int, np.integer)) and max_obs > 0:
+-        target = int(max_obs) if target is None else min(target, int(max_obs))
+-    if target is not None and target < len(X_all):
+-        rng = np.random.default_rng(getattr(config.training, 'seed', 1234) if hasattr(config, 'training') else 1234)
+-        idx = rng.choice(len(X_all), size=target, replace=False)
+-        X_obs = X_all[idx]
+-        u_obs = u_all[idx]
+-    else:
+-        X_obs, u_obs = X_all, u_all
+ 
+-    # Held-out validation split (10%) stratified by time t
+-    seed = int(getattr(config.training, 'seed', 1234) if hasattr(config, 'training') else 1234)
+-    X_obs, u_obs, X_obs_val, u_obs_val = _stratified_split_by_time(X_obs, u_obs, val_frac=0.10, seed=seed)
+ 
+-    # Domain bounds from data (already normalized coords)
+-    lb = X_all.min(axis=0)
+-    ub = X_all.max(axis=0)
+-
+-    # Collocation points via LHS; also include observation points to help enforce PDE where data exists
+-    n_f = int(getattr(config.data, 'n_f', 20000))
+-    X_f_train = _create_collocation_points(lb, ub, n_f, X_obs)
+-
+-    # No BCs by default (unless user wants to add them explicitly)
+-    X_u_train = np.zeros((0, 3), dtype=float)
+-    u_train = np.zeros((0, 1), dtype=float)
+-
+-    metadata = {
+-        'csv_mode': 'pointcloud',
+-        'obs_col': obs_col,
+-        'n_total': int(len(df)),
+-        'n_obs_used': int(len(X_obs)),
+-        'n_obs_val': int(len(X_obs_val)),
+-        'bounds': {'lb': lb.tolist(), 'ub': ub.tolist()},
+-    }
+-
+-    diff_coeff_true = _load_ground_truth(Path(csv_path), config)
+-
+-    return {
+-        'X_f_train': X_f_train,
+-        'X_u_train': X_u_train,
+-        'u_train': u_train,
+-        'X_obs': X_obs,
+-        'u_obs': u_obs,
+-        'X_u_test': X_all,
+-        'u_test': u_all,
+-        'bounds': (lb, ub),
+-        'grid': None,
+-        'usol': None,
+-        'diff_coeff_true': diff_coeff_true,
+-        'metadata': metadata,
+-    }
+-
+-
+ def load_csv_diffusion_data(config):
+     """
+     Load CSV diffusion data and create training/test sets.
+@@ -172,16 +56,8 @@
+     # Load CSV
+     csv_path = Path(config.data.input_file)
+     df = pd.read_csv(csv_path)
+-
+-    # ------------------------------------------------------------
+-    # Fast path: point-cloud CSV produced by our masking/extraction script
+-    # Columns: x, y, t, u (already in normalized coordinates and intensity)
+-    # ------------------------------------------------------------
+-    csv_mode = getattr(config.data, 'csv_mode', None)
+-    if csv_mode == 'pointcloud' or ('u' in df.columns and 'intensity' not in df.columns):
+-        return load_pointcloud_csv_data(config, df, csv_path)
+     
+-    # Validate columns (grid-style CSV)
++    # Validate columns
+     required_cols = ['x', 'y', 't', 'intensity']
+     for col in required_cols:
+         if col not in df.columns:

@@ -1,0 +1,62 @@
+
+% =============================================================================
+% TRAINING_DIAGNOSTICS - Generated: 2026-02-13 12:27:01
+% OVERLEAF DIRECTORY: IDW/Figs/run_130226_122657_649f
+% Upload all subfigures from outputs/subfigures/run_130226_122657_649f/ to this directory.
+% =============================================================================
+\begin{figure}[htbp]
+\centering
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{ccc}
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/D_evolution_log.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/D_evolution_linear.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/D_error.pdf} \\
+    \small (a) & \small (b) & \small (c) \\[0.5em]
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/losses.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/lambdas_log.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122657_649f/lambdas_linear.pdf} \\
+    \small (d) & \small (e) & \small (f) \\[0.5em]
+\end{tabular}
+\caption{Training diagnostics showing D evolution (log and linear), error, losses, and IDW weights (log and linear).}
+\label{fig:training_diagnostics}
+\end{figure}
+
+% Upload these files to IDW/Figs/run_130226_122657_649f/:
+%   D_evolution_log.pdf
+%   D_evolution_linear.pdf
+%   D_error.pdf
+%   losses.pdf
+%   lambdas_log.pdf
+%   lambdas_linear.pdf
+
+
+% =============================================================================
+% TRAINING_DIAGNOSTICS - Generated: 2026-02-13 12:28:47
+% OVERLEAF DIRECTORY: IDW/Figs/run_130226_122843_4af9
+% Upload all subfigures from outputs/subfigures/run_130226_122843_4af9/ to this directory.
+% =============================================================================
+\begin{figure}[htbp]
+\centering
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{ccc}
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/D_evolution_log.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/D_evolution_linear.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/D_error.pdf} \\
+    \small (a) & \small (b) & \small (c) \\[0.5em]
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/losses.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/lambdas_log.pdf} &
+    \includegraphics[width=0.24\textwidth]{IDW/Figs/run_130226_122843_4af9/lambdas_linear.pdf} \\
+    \small (d) & \small (e) & \small (f) \\[0.5em]
+\end{tabular}
+\caption{Training diagnostics showing D evolution (log and linear), error, losses, and IDW weights (log and linear).}
+\label{fig:training_diagnostics}
+\end{figure}
+
+% Upload these files to IDW/Figs/run_130226_122843_4af9/:
+%   D_evolution_log.pdf
+%   D_evolution_linear.pdf
+%   D_error.pdf
+%   losses.pdf
+%   lambdas_log.pdf
+%   lambdas_linear.pdf
+

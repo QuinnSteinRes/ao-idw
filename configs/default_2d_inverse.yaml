@@ -32,8 +32,8 @@ training:
 
 # Data parameters
 data:
-  input_file: "data.csv"  # cluster data format
-  #input_file: "src/idw_pinn/data/gtDiff2D.mat"  # Path to ground truth data
+  #input_file: "data.csv"  # cluster data format
+  input_file: "src/idw_pinn/data/dataset.csv"  # Path to ground truth data
   #input_file: "src/idw_pinn/data/intensity_time_series_spatial_temporal.csv"  # Path to ground truth data
 
   n_u: 200                     # BC/IC points 200

@@ -518,8 +518,9 @@ class IDWPINNTrainer:
         #print(f"D_error: {diff_coeff_error:.6f} "
         #      f"({100*diff_coeff_error/self.data['diff_coeff_true']:.2f}%)")
         if diff_coeff_error is not None:
+            rel_error = abs(diff_coeff_error / d_true_f)
             print(f"D_error: {diff_coeff_error:.6f} "
-                  f"(relative error {rel_error:.3e})")
+                f"(relative error {rel_error:.3e})")
         else:
             print("D_error: NA (experimental)")
         print("="*70)

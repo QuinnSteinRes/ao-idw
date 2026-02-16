@@ -19,11 +19,11 @@ idw:
 # Training parameters
 training:
   adam_lr: 1.0e-3         # Adam optimizer learning rate
-  adam_epochs: 10     # Number of Adam epochs 4000
-  print_every: 200        # Print/log frequency (in epochs)
+  adam_epochs: 1000     # Number of Adam epochs 4000
+  print_every: 1000        # Print/log frequency (in epochs)
   
   # L-BFGS parameters (scipy.optimize.minimize)
-  lbfgs_maxiter: 10     # Maximum L-BFGS iterations 4000
+  lbfgs_maxiter: 1000     # Maximum L-BFGS iterations 4000
   lbfgs_maxfun: 2000      # Maximum function evaluations
   lbfgs_maxcor: 200       # Maximum variable metric corrections
   lbfgs_ftol: 2.220446049250313e-09  # Function tolerance (np.finfo(float).eps)
@@ -37,8 +37,8 @@ data:
   #input_file: "src/idw_pinn/data/intensity_time_series_spatial_temporal.csv"  # Path to ground truth data
 
   n_u: 200                     # BC/IC points 200
-  n_f: 2000                    # Collocation points (PDE residual) 2000
-  n_obs: 2500                  # Interior observation points (for inverse problem) 2500
+  n_f: 20000                    # Collocation points (PDE residual) 2000
+  n_obs: 25000                  # Interior observation points (for inverse problem) 2500
 
 # Network architecture
 network:

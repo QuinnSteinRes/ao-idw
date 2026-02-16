@@ -36,6 +36,7 @@ from idw_pinn.utils import (
     plot_training_diagnostics,
     plot_gradient_histograms
 )
+from idw_pinn.utils.plotting import plot_experimental_comparison
 
 def setup_environment(seed=123):
     """
@@ -126,10 +127,27 @@ def print_final_summary(config, data, model, training_results, output_dir='outpu
     if 'training_time' in training_results:
         print(f"  Training time       = {training_results['training_time']:.2f} s")
     
+    # IDW lambda values (check if L-BFGS history exists and is not empty)
+    if 'history_lbfgs' in training_results and len(training_results['history_lbfgs']) > 0:
+        final_lam_data = training_results['history_lbfgs'][-1]['lambda_data']
+        final_lam_f = training_results['history_lbfgs'][-1]['lambda_f']
+        print(f"  lambda_data         = {final_lam_data:.6f}")
+        print(f"  lambda_f            = {final_lam_f:.6f}")
+    elif 'history' in training_results and len(training_results['history']) > 0:
+        # Fallback to Adam history if L-BFGS didn't run
+        final_lam_data = training_results['history'][-1]['lambda_data']
+        final_lam_f = training_results['history'][-1]['lambda_f']
+        print(f"  lambda_data (Adam)  = {final_lam_data:.6f}")
+        print(f"  lambda_f (Adam)     = {final_lam_f:.6f}")
+    else:
+        print(f"  lambda_data         = N/A")
+        print(f"  lambda_f            = N/A")
+    
     # Output files
     print(f"\n--- Output Files ---")
     print(f"  Directory: {output_dir}/")
     print(f"    - training_diagnostics_*.pdf")
+    print(f"    - solution_comparison_*.pdf")
     print(f"    - gradient_histogram_*.pdf")
     print(f"    - subfigures/ (individual panels)")
     print(f"    - latex_snippets.txt")
@@ -224,8 +242,10 @@ def main():
         output_dir=args.output_dir
     )
     
-    # Generate visualizations
-    print("\n--- Generating Visualizations ---")
+    # =========================================================================
+    # SOLUTION COMPARISON VISUALIZATION (RESTORED)
+    # =========================================================================
+    print("\n--- Generating Solution Comparison Visualizations ---")
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Build a grid for visualization if not provided by the data loader
@@ -236,12 +256,13 @@ def main():
                 X_list.append(data[k])
         if len(X_list) == 0:
             raise ValueError("Cannot build visualization grid: no point arrays found.")
+        
         X_all = np.vstack(X_list)
-
+        
         x_min, x_max = float(np.min(X_all[:, 0])), float(np.max(X_all[:, 0]))
         y_min, y_max = float(np.min(X_all[:, 1])), float(np.max(X_all[:, 1]))
         t_vals = np.unique(X_all[:, 2])
-
+        
         nx = 150
         ny = 150
         x = np.linspace(x_min, x_max, nx)
@@ -249,40 +270,122 @@ def main():
         t = t_vals
         data['grid'] = (x, y, t)
 
-    # Experimental/pointcloud mode: no ground-truth solution grid
+    # Determine if experimental/pointcloud mode
     is_pointcloud = (data.get('metadata', {}).get('csv_mode') == 'pointcloud')
     diff_coeff_true = None  # Default for experimental data
-    
+
     if is_pointcloud or data.get('usol', None) is None:
-        # Skip viz_slices generation - don't create hundreds of time slice images
-        print("[viz] Skipping time-slice visualization for experimental data")
+        # Experimental data: Create "measured" visualization from observation points
+        print("[viz] Generating experimental data solution comparison")
+        
+        x, y, t = data['grid']
+        XX, YY = np.meshgrid(x, y, indexing='xy')
+        
+        # Get observation data to create pseudo-ground-truth grid
+        X_obs = data.get('X_obs', None)
+        u_obs = data.get('u_obs', None)
+        
+        if X_obs is not None and u_obs is not None:
+            # Interpolate observations onto regular grid for each time point
+            from scipy.interpolate import griddata
+            
+            usol_measured = np.zeros((len(x), len(y), len(t)))
+            
+            for ti, t_val in enumerate(t):
+                # Get observations at this time
+                mask = np.abs(X_obs[:, 2] - t_val) < 1e-6
+                if np.any(mask):
+                    xy_obs = X_obs[mask, :2]
+                    u_obs_t = u_obs[mask]
+                    
+                    # Interpolate onto grid
+                    usol_measured[:, :, ti] = griddata(
+                        xy_obs, 
+                        u_obs_t.flatten(), 
+                        (XX, YY), 
+                        method='linear',
+                        fill_value=0.0
+                    )
+            
+            # Get predictions on grid for all time points
+            XY = np.stack([XX.ravel(), YY.ravel()], axis=1)
+            u_pred_all = []
+            
+            for t_val in t:
+                tt = np.full((XY.shape[0], 1), float(t_val))
+                Xq = np.hstack([XY, tt])
+                
+                # Use intensity evaluation if available
+                eval_fn = (getattr(model, "evaluate_intensity", None) or 
+                          getattr(model, "predict_observation", None) or 
+                          model.evaluate)
+                u_pred_t = np.asarray(eval_fn(Xq)).reshape(len(x), len(y))
+                u_pred_all.append(u_pred_t)
+            
+            u_pred_grid = np.stack(u_pred_all, axis=2)
+            
+            # Plot comparison using experimental wrapper
+            plot_experimental_comparison(
+                u_pred=u_pred_grid,
+                intensity_measured=usol_measured,
+                x=x,
+                y=y,
+                t=t,
+                diff_coeff_learned=training_results['diff_coeff_learned'],
+                output_dir=args.output_dir
+            )
+        else:
+            print("[viz] Warning: No observation data available for solution comparison")
+            
     else:
         # Synthetic mode: compare to ground truth on grid
+        print("[viz] Generating synthetic data solution comparison")
         diff_coeff_true = data.get('diff_coeff_true', None)
         
         x, y, t = data['grid']
         XX, YY = np.meshgrid(x, y, indexing='xy')
         XY = np.stack([XX.ravel(), YY.ravel()], axis=1)
-        # assume single time t if scalar, else use first for comparison plotting
-        t0 = float(t[0]) if hasattr(t, '__len__') else float(t)
-        tt = np.full((XY.shape[0], 1), t0)
-        Xq = np.hstack([XY, tt])
-
-        eval_fn = getattr(model, "evaluate_intensity", None) or getattr(model, "predict_observation", None) or model.evaluate
-        u_pred = np.asarray(eval_fn(Xq)).reshape(-1,)
-
+        
+        # For synthetic data, t might be an array - handle all time points
+        if hasattr(t, '__len__'):
+            u_pred_all = []
+            for t_val in t:
+                tt = np.full((XY.shape[0], 1), float(t_val))
+                Xq = np.hstack([XY, tt])
+                
+                eval_fn = (getattr(model, "evaluate_intensity", None) or 
+                          getattr(model, "predict_observation", None) or 
+                          model.evaluate)
+                u_pred_t = np.asarray(eval_fn(Xq)).reshape(len(x), len(y))
+                u_pred_all.append(u_pred_t)
+            
+            u_pred = np.stack(u_pred_all, axis=2)
+        else:
+            # Single time point
+            t0 = float(t)
+            tt = np.full((XY.shape[0], 1), t0)
+            Xq = np.hstack([XY, tt])
+            
+            eval_fn = (getattr(model, "evaluate_intensity", None) or 
+                      getattr(model, "predict_observation", None) or 
+                      model.evaluate)
+            u_pred = np.asarray(eval_fn(Xq)).reshape(-1,)
+        
         plot_2d_solution_comparison(
             u_pred=u_pred,
             usol=data['usol'],
             x=x,
             y=y,
-            t=t0,
+            t=t,
             diff_coeff_learned=training_results['diff_coeff_learned'],
             diff_coeff_true=diff_coeff_true,
             output_dir=args.output_dir
         )
 
-    # Training diagnostics (diff_coeff_true now guaranteed to exist)
+    # =========================================================================
+    # TRAINING DIAGNOSTICS
+    # =========================================================================
+    print("\n--- Generating Training Diagnostics ---")
     plot_training_diagnostics(
         history_adam=training_results['history'],
         history_lbfgs=training_results['history_lbfgs'],
